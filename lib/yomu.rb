@@ -35,7 +35,6 @@ class Yomu
       result = Timeout.timeout(options[:timeout]) do
         pipe.write data
         pipe.close_write
-        Process.wait(pipe.pid)
         response = pipe.read
         pipe.close_read
         response
