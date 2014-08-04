@@ -15,7 +15,7 @@ class Yomu
   #   metadata = Yomu.read :metadata, data
 
   def self.read(type, data, options = {})
-    options[:timeout] = 60
+    options[:timeout] ||= 60
 
     switch = case type
     when :text
@@ -28,32 +28,41 @@ class Yomu
       '-m -j'
     end
 
-    result = IO.popen "#{java} -Djava.awt.headless=true -jar #{Yomu::JARPATH} #{switch}", 'r+' do |io|
-      pid = io.pid
-      begin
-        Timeout.timeout(options[:timeout]) do
-          io.write data
-          io.close_write
-          response = io.read
-          io.close_read
-          response
-        end
-      rescue Timeout::Error => e
-        Process.kill(:KILL, pid)
-        ""
+    begin
+      cmd = "#{java} -Djava.awt.headless=true -jar #{Yomu::JARPATH} #{switch}"
+      pipe = IO.popen(cmd, 'r+')
+
+      result = Timeout.timeout(options[:timeout]) do
+        pipe.write data
+        pipe.close_write
+        Process.wait(pipe.pid)
+        response = pipe.read
+        pipe.close_read
+        response
       end
+
+      case type
+      when :text
+        result
+      when :html
+        result
+      when :metadata
+        JSON.parse(result)
+      when :mimetype
+        MIME::Types[JSON.parse(result)['Content-Type']].first
+      end
+
+    rescue Timeout::Error => e
+      begin
+        Process.kill(:KILL, pipe.pid)
+        Process.wait(pipe.pid)
+      rescue Errno::ESRCH
+      end
+      nil
+    ensure
+      pipe.close unless pipe.closed?
     end
 
-    case type
-    when :text
-      result
-    when :html
-      result
-    when :metadata
-      JSON.parse(result)
-    when :mimetype
-      MIME::Types[JSON.parse(result)['Content-Type']].first
-    end
   end
 
   # Create a new instance of Yomu with a given document.
