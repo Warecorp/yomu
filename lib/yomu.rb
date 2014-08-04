@@ -1,5 +1,5 @@
 require 'yomu/version'
-
+require 'timeout'
 require 'net/http'
 require 'mime/types'
 require 'json'
@@ -14,7 +14,9 @@ class Yomu
   #   text = Yomu.read :text, data
   #   metadata = Yomu.read :metadata, data
 
-  def self.read(type, data)
+  def self.read(type, data, options = {})
+    options[:timeout] = 60
+
     switch = case type
     when :text
       '-t'
@@ -25,11 +27,21 @@ class Yomu
     when :mimetype
       '-m -j'
     end
-    
+
     result = IO.popen "#{java} -Djava.awt.headless=true -jar #{Yomu::JARPATH} #{switch}", 'r+' do |io|
-      io.write data
-      io.close_write
-      io.read
+      pid = io.pid
+      begin
+        Timeout.timeout(options[:timeout]) do
+          io.write data
+          io.close_write
+          response = io.read
+          io.close_read
+          response
+        end
+      rescue Timeout::Error => e
+        Process.kill(:KILL, pid)
+        ""
+      end
     end
 
     case type
@@ -117,7 +129,7 @@ class Yomu
     return @mimetype if defined? @mimetype
 
     type = metadata["Content-Type"].is_a?(Array) ? metadata["Content-Type"].first : metadata["Content-Type"]
-    
+
     @mimetype = MIME::Types[type].first
   end
 
@@ -129,7 +141,7 @@ class Yomu
 
   def creation_date
     return @creation_date if defined? @creation_date
- 
+
     if metadata['Creation-Date']
       @creation_date = Time.parse(metadata['Creation-Date'])
     else
